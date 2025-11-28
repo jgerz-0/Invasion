@@ -1,0 +1,43 @@
+# Python virtual environment
+venv/
+env/
+ENV/
+
+# Environment variables and secrets
+.env
+serviceAccountKey.json
+*.json
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# ChromaDB persistence
+chroma_db/
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Test coverage
+.coverage
+htmlcov/
+
+# Jupyter Notebook
+.ipynb_checkpoints

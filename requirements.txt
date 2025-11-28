@@ -1,0 +1,20 @@
+# OpenAI API for LLM interaction
+openai
+
+# LangChain for agent orchestration and RAG
+langchain
+langchain-openai
+langchain-community
+
+# Vector Store for RAG (ChromaDB for simplicity)
+chromadb
+
+# Environment variable management
+python-dotenv
+
+# Firebase/Firestore for persistent memory
+firebase-admin
+
+# Additional utilities
+requests
+pydantic
