@@ -74,6 +74,9 @@ pip install -r requirements.txt
    CHROMADB_PERSIST_DIR="./chroma_db"
    ```
 
+   The backend validates these values on startup via `config.Settings.from_env`,
+   ensuring the API key is present and the Firebase credentials path exists.
+
 ### Step 5: Setup Firebase
 
 1. Go to [Firebase Console](https://console.firebase.google.com/)

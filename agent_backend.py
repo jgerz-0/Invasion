@@ -1,55 +1,37 @@
-"""
-PenTest AI Agent Backend
-========================
-This module implements a PenTest AI Agent using OpenAI's API, LangChain for orchestration,
-ChromaDB for RAG (Retrieval-Augmented Generation), and Firebase/Firestore for persistent memory.
+"""PenTest AI Agent Backend.
 
-Core Components:
-- LLM Integration (OpenAI GPT-4)
-- RAG System (ChromaDB vector store)
-- Persistent Memory (Firestore)
-- Tool Execution Framework
+This module wires together configuration loading, LLM + RAG initialization, and
+Firestore-backed persistence for the PenTest AI Agent. It exposes two public
+functions:
+
+* ``initialize_agent`` – build the agent context (LLM, vector store, Firestore).
+* ``handle_command`` – process an incoming command using the initialized agent.
 """
 
-import os
 import json
-from typing import Dict, List, Any, Optional
 from datetime import datetime
+from typing import Any, Dict, List, Optional
 
-# Environment and Configuration
-from dotenv import load_dotenv
-
-# OpenAI and LangChain
-from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain.agents import AgentExecutor, create_openai_functions_agent
+from langchain.memory import ConversationBufferMemory
 from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain.tools import Tool
-from langchain.schema import SystemMessage, HumanMessage, AIMessage
-from langchain.memory import ConversationBufferMemory
-
-# Vector Store for RAG
 from langchain_community.vectorstores import Chroma
+from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 
-# Firebase for persistent storage
 import firebase_admin
 from firebase_admin import credentials, firestore
 
-# Load environment variables
-load_dotenv()
+from config import Settings
 
 
 class PenTestAgent:
-    """
-    Main PenTest AI Agent class that orchestrates LLM, RAG, and persistent memory.
-    """
-    
-    def __init__(self):
+    """Orchestrates LLM, RAG, and persistent memory."""
+
+    def __init__(self, settings: Settings):
         """Initialize the PenTest Agent with all required components."""
-        self.openai_api_key = os.getenv("OPENAI_API_KEY")
-        self.firebase_credentials_path = os.getenv("FIREBASE_CREDENTIALS_PATH")
-        self.model_name = os.getenv("OPENAI_MODEL", "gpt-4")
-        self.chroma_persist_dir = os.getenv("CHROMADB_PERSIST_DIR", "./chroma_db")
-        
+        self.settings = settings
+
         # Initialize components
         self.llm = None
         self.embeddings = None
@@ -57,7 +39,7 @@ class PenTestAgent:
         self.db = None
         self.memory = None
         self.agent_executor = None
-        
+
         # Initialize the agent
         self._initialize_llm()
         self._initialize_rag()
@@ -67,20 +49,17 @@ class PenTestAgent:
     
     def _initialize_llm(self):
         """Initialize the OpenAI LLM."""
-        if not self.openai_api_key:
-            raise ValueError("OPENAI_API_KEY not found in environment variables")
-        
         self.llm = ChatOpenAI(
-            model=self.model_name,
+            model=self.settings.openai_model,
             temperature=0.7,
-            openai_api_key=self.openai_api_key
+            openai_api_key=self.settings.openai_api_key
         )
-        
+
         self.embeddings = OpenAIEmbeddings(
-            openai_api_key=self.openai_api_key
+            openai_api_key=self.settings.openai_api_key
         )
-        
-        print(f"✓ LLM initialized: {self.model_name}")
+
+        print(f"✓ LLM initialized: {self.settings.openai_model}")
     
     def _initialize_rag(self):
         """Initialize the RAG system with ChromaDB."""
@@ -89,9 +68,9 @@ class PenTestAgent:
             self.vector_store = Chroma(
                 collection_name="pentest_knowledge",
                 embedding_function=self.embeddings,
-                persist_directory=self.chroma_persist_dir
+                persist_directory=self.settings.chromadb_persist_dir
             )
-            print(f"✓ RAG system initialized with ChromaDB at {self.chroma_persist_dir}")
+            print(f"✓ RAG system initialized with ChromaDB at {self.settings.chromadb_persist_dir}")
         except Exception as e:
             print(f"Warning: Could not initialize ChromaDB: {e}")
             self.vector_store = None
@@ -100,13 +79,13 @@ class PenTestAgent:
         """Initialize Firebase/Firestore for persistent memory."""
         try:
             if not firebase_admin._apps:
-                if os.path.exists(self.firebase_credentials_path):
-                    cred = credentials.Certificate(self.firebase_credentials_path)
+                if self.settings.firebase_credentials_path.exists():
+                    cred = credentials.Certificate(str(self.settings.firebase_credentials_path))
                     firebase_admin.initialize_app(cred)
                     self.db = firestore.client()
                     print("✓ Firestore initialized for persistent memory")
                 else:
-                    print(f"Warning: Firebase credentials not found at {self.firebase_credentials_path}")
+                    print(f"Warning: Firebase credentials not found at {self.settings.firebase_credentials_path}")
                     self.db = None
             else:
                 self.db = firestore.client()
@@ -302,49 +281,75 @@ explain your reasoning and provide actionable recommendations.
             documents: List of text documents to add
             metadatas: Optional metadata for each document
         """
-        if self.vector_store:
-            try:
-                self.vector_store.add_texts(
-                    texts=documents,
-                    metadatas=metadatas
-                )
-                print(f"✓ Added {len(documents)} documents to knowledge base")
-            except Exception as e:
-                print(f"Error adding documents to knowledge base: {e}")
-        else:
+        if not self.vector_store:
             print("Vector store not initialized")
+            return
+
+        try:
+            self.vector_store.add_texts(
+                texts=documents,
+                metadatas=metadatas,
+            )
+            print(f"✓ Added {len(documents)} documents to knowledge base")
+        except Exception as e:
+            print(f"Error adding documents to knowledge base: {e}")
+
+
+def initialize_agent(settings: Optional[Settings] = None) -> Dict[str, Any]:
+    """Initialize the agent and return a reusable context."""
+
+    resolved_settings = settings or Settings.from_env()
+    agent = PenTestAgent(resolved_settings)
+    return {
+        "agent": agent,
+        "settings": resolved_settings,
+    }
+
+
+def handle_command(command: str, engagement_name: str, context: Dict[str, Any]) -> Dict[str, Any]:
+    """Process a command using a previously initialized context."""
+
+    agent: PenTestAgent = context["agent"]
+    return agent.handle_command(command=command, engagement_name=engagement_name)
 
 
 def main():
-    """
-    Example usage of the PenTest Agent.
-    """
+    """Lightweight smoke test for initialization and a single command."""
+
     print("=" * 60)
     print("PenTest AI Agent - Backend Initialization")
     print("=" * 60)
-    
-    # Initialize the agent
-    agent = PenTestAgent()
-    
+
+    try:
+        context = initialize_agent()
+    except Exception as exc:  # noqa: BLE001
+        print(f"Failed to initialize agent: {exc}")
+        return
+
+    settings: Settings = context["settings"]
+    print("Configuration (safe):")
+    print(json.dumps(settings.safe_dict(), indent=2))
+
+    agent: PenTestAgent = context["agent"]
+
     print("\n" + "=" * 60)
     print("Agent Ready!")
     print("=" * 60)
-    
-    # Example: Add some knowledge to the RAG system
+
     sample_knowledge = [
         "OWASP Top 10 includes SQL Injection, which allows attackers to interfere with database queries.",
         "Port scanning is typically done using tools like Nmap to discover open ports and services.",
         "XSS (Cross-Site Scripting) allows attackers to inject malicious scripts into web pages.",
     ]
-    
+
     agent.add_knowledge(sample_knowledge)
-    
-    # Example: Handle a command
-    response = agent.handle_command(
+
+    response = handle_command(
         command="What are common web application vulnerabilities?",
-        engagement_name="demo-engagement-001"
+        engagement_name="demo-engagement-001",
+        context=context,
     )
-    
+
     print("\n" + "=" * 60)
     print("Example Response:")
     print("=" * 60)
